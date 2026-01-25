@@ -85,9 +85,6 @@ size_t FrameUnpacker::unpack(
         pos_channel = frame_data + config_.bytes_per_channel();
     }
     
-    // Reserve space for events (estimate: ~5% of pixels have events)
-    events.reserve(config_.pixels_per_channel() / 10);
-    
     // Unpack all pixels
     for (int y = 0; y < config_.height; y++) {
         for (int x = 0; x < config_.width; x++) {
