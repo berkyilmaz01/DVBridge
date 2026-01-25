@@ -2,6 +2,11 @@
 #include <iostream>
 #include <cstring>
 
+// Windows doesn't define ssize_t
+#ifdef _WIN32
+typedef int ssize_t;
+#endif
+
 namespace converter {
 
 // Static member initialization
