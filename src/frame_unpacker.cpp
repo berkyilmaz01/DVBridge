@@ -146,9 +146,6 @@ size_t FrameUnpacker::unpack(
         pos_channel = frame_data + config_.bytes_per_channel();
     }
 
-    // Reserve space for events (estimate based on typical event density)
-    events.reserve(config_.pixels_per_channel() / 10);
-
     // Unpack both channels using optimized byte-level processing
     unpackChannelFast(pos_channel, timestamp, true, events);
     unpackChannelFast(neg_channel, timestamp, false, events);
