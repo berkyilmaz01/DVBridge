@@ -17,8 +17,8 @@ struct Config {
     // FRAME SETTINGS
     // =========================================================================
     
-    int width = 1280;           // Frame width in pixels
-    int height = 780;           // Frame height in pixels
+    int width = 2048;           // Frame width in pixels (2048x2048 = 1MB frames)
+    int height = 2048;          // Frame height in pixels
     
     // Auto-calculated (do not modify)
     int pixels_per_channel() const { return width * height; }
@@ -46,7 +46,7 @@ struct Config {
     // =========================================================================
     
     // Does the camera send a size header before each frame?
-    bool has_header = true;
+    bool has_header = false;  // No header - raw frames back-to-back
     
     // Header size in bytes (only used if has_header = true)
     // Common values: 4 (uint32_t size)
