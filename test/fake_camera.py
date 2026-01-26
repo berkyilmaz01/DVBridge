@@ -18,11 +18,12 @@ import sys
 import math
 
 # Frame configuration (must match config.hpp)
-WIDTH = 1280
-HEIGHT = 780
+# 2048x2048 = 1MB frames for high-volume testing
+WIDTH = 2048
+HEIGHT = 2048
 CHANNELS = 2  # positive and negative
-BYTES_PER_CHANNEL = (WIDTH * HEIGHT) // 8  # 124,800 bytes
-FRAME_SIZE = CHANNELS * BYTES_PER_CHANNEL   # 249,600 bytes
+BYTES_PER_CHANNEL = (WIDTH * HEIGHT) // 8  # 524,288 bytes per channel
+FRAME_SIZE = CHANNELS * BYTES_PER_CHANNEL   # 1,048,576 bytes (1 MB)
 
 # Running flag for graceful shutdown
 running = True
