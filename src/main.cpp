@@ -1,5 +1,6 @@
 #include "config.hpp"
 #include "tcp_receiver.hpp"
+#include "udp_receiver.hpp"
 #include "frame_unpacker.hpp"
 
 #include <dv-processing/io/network_writer.hpp>
@@ -12,6 +13,8 @@
 #include <thread>
 #include <csignal>
 #include <atomic>
+#include <memory>
+#include <variant>
 
 // Global flag for graceful shutdown
 std::atomic<bool> running{true};
@@ -49,31 +52,64 @@ void printStats(
 int main(int argc, char* argv[])
 {
     std::cout << "============================================" << std::endl;
-    std::cout << "   TCP to AEDAT4 Converter" << std::endl;
+    std::cout << "   TCP/UDP to AEDAT4 Converter" << std::endl;
     std::cout << "============================================" << std::endl;
-    
+
     // Setup signal handler for graceful shutdown
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
-    
+
     // Use global config (modify in config.hpp or add command line parsing)
     converter::Config& config = converter::config;
-    
+
     // Print configuration
     std::cout << "\nConfiguration:" << std::endl;
+    std::cout << "  Protocol: " << converter::protocolToString(config.protocol) << std::endl;
     std::cout << "  Frame size: " << config.width << " x " << config.height << std::endl;
     std::cout << "  Frame data size: " << config.frame_size() << " bytes" << std::endl;
-    std::cout << "  Camera: " << config.camera_ip << ":" << config.camera_port << std::endl;
+    if (config.protocol == converter::Protocol::TCP) {
+        std::cout << "  Camera (connect to): " << config.camera_ip << ":" << config.camera_port << std::endl;
+    } else {
+        std::cout << "  Listen port: " << config.camera_port << std::endl;
+        std::cout << "  UDP packet size: " << config.udp_packet_size << " bytes" << std::endl;
+    }
     std::cout << "  AEDAT4 output port: " << config.aedat_port << std::endl;
     std::cout << "  Frame interval: " << config.frame_interval_us << " us" << std::endl;
-    std::cout << "  Has header: " << (config.has_header ? "yes" : "no") << std::endl;
+    if (config.protocol == converter::Protocol::TCP) {
+        std::cout << "  Has header: " << (config.has_header ? "yes" : "no") << std::endl;
+    }
     std::cout << "  MSB first: " << (config.msb_first ? "yes" : "no") << std::endl;
     std::cout << "  Positive first: " << (config.positive_first ? "yes" : "no") << std::endl;
     std::cout << "  Row major: " << (config.row_major ? "yes" : "no") << std::endl;
     std::cout << std::endl;
-    
-    // Create components
-    converter::TcpReceiver receiver(config);
+
+    // Create receiver based on protocol
+    using ReceiverVariant = std::variant<converter::TcpReceiver, converter::UdpReceiver>;
+    std::unique_ptr<ReceiverVariant> receiver_ptr;
+
+    if (config.protocol == converter::Protocol::TCP) {
+        receiver_ptr = std::make_unique<ReceiverVariant>(std::in_place_type<converter::TcpReceiver>, config);
+    } else {
+        receiver_ptr = std::make_unique<ReceiverVariant>(std::in_place_type<converter::UdpReceiver>, config);
+    }
+
+    // Helper lambdas to work with the variant
+    auto connect_receiver = [&]() -> bool {
+        return std::visit([](auto& r) { return r.connect(); }, *receiver_ptr);
+    };
+
+    auto disconnect_receiver = [&]() {
+        std::visit([](auto& r) { r.disconnect(); }, *receiver_ptr);
+    };
+
+    auto receive_frame = [&](std::vector<uint8_t>& buffer) -> bool {
+        return std::visit([&buffer](auto& r) { return r.receiveFrame(buffer); }, *receiver_ptr);
+    };
+
+    auto get_total_bytes = [&]() -> uint64_t {
+        return std::visit([](auto& r) { return r.getTotalBytesReceived(); }, *receiver_ptr);
+    };
+
     converter::FrameUnpacker unpacker(config);
     
     // Create AEDAT4 TCP server (DV viewer connects here)
@@ -92,10 +128,15 @@ int main(int argc, char* argv[])
     std::cout << "AEDAT4 server started. DV viewer can connect to port " << config.aedat_port << std::endl;
     std::cout << std::endl;
     
-    // Connect to camera
-    std::cout << "Connecting to camera..." << std::endl;
-    if (!receiver.connect()) {
-        std::cerr << "Failed to connect to camera. Exiting." << std::endl;
+    // Connect/bind to receive data
+    if (config.protocol == converter::Protocol::TCP) {
+        std::cout << "Connecting to camera..." << std::endl;
+    } else {
+        std::cout << "Binding UDP socket..." << std::endl;
+    }
+
+    if (!connect_receiver()) {
+        std::cerr << "Failed to initialize receiver. Exiting." << std::endl;
         return 1;
     }
     
@@ -114,15 +155,15 @@ int main(int argc, char* argv[])
     // Main loop
     while (running) {
         // Receive frame from camera
-        if (!receiver.receiveFrame(frame_buffer)) {
+        if (!receive_frame(frame_buffer)) {
             if (running) {
                 std::cerr << "Failed to receive frame. Reconnecting..." << std::endl;
-                receiver.disconnect();
-                
+                disconnect_receiver();
+
                 // Wait a bit before reconnecting
                 std::this_thread::sleep_for(std::chrono::seconds(1));
-                
-                if (!receiver.connect()) {
+
+                if (!connect_receiver()) {
                     std::cerr << "Reconnection failed. Exiting." << std::endl;
                     break;
                 }
@@ -144,19 +185,19 @@ int main(int argc, char* argv[])
         
         // Print statistics periodically
         if (config.stats_interval > 0 && frame_count % config.stats_interval == 0) {
-            printStats(frame_count, total_events, receiver.getTotalBytesReceived(), start_time);
+            printStats(frame_count, total_events, get_total_bytes(), start_time);
         }
     }
-    
+
     // Final statistics
     std::cout << std::endl;
     std::cout << "============================================" << std::endl;
     std::cout << "Final Statistics:" << std::endl;
-    printStats(frame_count, total_events, receiver.getTotalBytesReceived(), start_time);
+    printStats(frame_count, total_events, get_total_bytes(), start_time);
     std::cout << "============================================" << std::endl;
-    
+
     // Cleanup
-    receiver.disconnect();
+    disconnect_receiver();
     
     std::cout << "Shutdown complete." << std::endl;
     return 0;
