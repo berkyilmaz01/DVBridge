@@ -119,12 +119,12 @@ private:
     socket_t socket_;
     bool bound_;
 
-    // Buffer for accumulating frame data from multiple packets
-    std::vector<uint8_t> accumulation_buffer_;
-    size_t accumulated_bytes_;
-
     // Receive buffer for individual UDP packets
     std::vector<uint8_t> packet_buffer_;
+
+    // Leftover bytes from previous packet that belong to next frame
+    std::vector<uint8_t> leftover_buffer_;
+    size_t leftover_bytes_;
 
     uint64_t total_bytes_received_;
     uint64_t total_frames_received_;
