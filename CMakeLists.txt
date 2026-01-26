@@ -31,6 +31,7 @@ message(STATUS "Found OpenCV: ${OpenCV_VERSION}")
 add_executable(converter
     src/main.cpp
     src/tcp_receiver.cpp
+    src/udp_receiver.cpp
     src/frame_unpacker.cpp
 )
 
@@ -81,6 +82,7 @@ if(BUILD_TESTING)
     # Create test library with common code
     add_library(converter_lib STATIC
         src/tcp_receiver.cpp
+        src/udp_receiver.cpp
         src/frame_unpacker.cpp
     )
     target_include_directories(converter_lib PUBLIC

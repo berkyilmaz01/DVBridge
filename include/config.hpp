@@ -6,34 +6,71 @@
 namespace converter {
 
 /**
- * Configuration for TCP to AEDAT4 Converter
- * 
+ * Protocol type for camera connection
+ */
+enum class Protocol {
+    TCP,    // TCP client - connects to camera server
+    UDP     // UDP receiver - binds to port and receives datagrams
+};
+
+/**
+ * Helper to convert Protocol enum to string
+ */
+inline const char* protocolToString(Protocol p) {
+    switch (p) {
+        case Protocol::TCP: return "TCP";
+        case Protocol::UDP: return "UDP";
+        default: return "Unknown";
+    }
+}
+
+/**
+ * Configuration for TCP/UDP to AEDAT4 Converter
+ *
  * Modify these values to match your camera settings.
  * If the image looks wrong, try flipping the bit unpacking flags.
  */
 struct Config {
-    
+
     // =========================================================================
     // FRAME SETTINGS
     // =========================================================================
-    
-    int width = 2048;           // Frame width in pixels (2048x2048 = 1MB frames)
-    int height = 2048;          // Frame height in pixels
-    
+
+    int width = 1280;           // Frame width in pixels
+    int height = 780;           // Frame height in pixels
+
     // Auto-calculated (do not modify)
     int pixels_per_channel() const { return width * height; }
     int bytes_per_channel() const { return pixels_per_channel() / 8; }
     int frame_size() const { return 2 * bytes_per_channel(); }  // 2 channels
-    
+
+    // =========================================================================
+    // PROTOCOL SELECTION
+    // =========================================================================
+
+    Protocol protocol = Protocol::UDP;  // UDP is default (used by FPGA)
+
     // =========================================================================
     // NETWORK SETTINGS - INPUT (from camera)
     // =========================================================================
-    
-    std::string camera_ip = "127.0.0.1";  // Camera IP address
-    int camera_port = 5000;                // Camera TCP port
-    
-    // TCP receive buffer size (bytes) - larger = handles bursts better
+
+    // For TCP: IP address to connect to
+    // For UDP: IP to bind to (use "0.0.0.0" to listen on all interfaces)
+    std::string camera_ip = "0.0.0.0";
+    int camera_port = 5000;                // Camera port (TCP or UDP)
+
+    // Receive buffer size (bytes) - larger = handles bursts better
     int recv_buffer_size = 50 * 1024 * 1024;  // 50 MB
+
+    // =========================================================================
+    // UDP-SPECIFIC SETTINGS
+    // =========================================================================
+
+    // Maximum UDP packet size to receive
+    // Standard: 65535 bytes (max UDP datagram)
+    // Jumbo frames on 10G: up to 9000 bytes MTU, ~8972 payload
+    // Set this to match your network configuration
+    int udp_packet_size = 65535;
     
     // =========================================================================
     // NETWORK SETTINGS - OUTPUT (to DV viewer)
@@ -42,11 +79,12 @@ struct Config {
     int aedat_port = 7777;      // Port where DV viewer connects
     
     // =========================================================================
-    // FRAME HEADER SETTINGS
+    // FRAME HEADER SETTINGS (TCP only)
     // =========================================================================
-    
+
     // Does the camera send a size header before each frame?
-    bool has_header = false;  // No header - raw frames back-to-back
+    // Note: FPGA typically sends raw data without headers (set to false)
+    bool has_header = false;
     
     // Header size in bytes (only used if has_header = true)
     // Common values: 4 (uint32_t size)
@@ -79,7 +117,8 @@ struct Config {
     // Microseconds between frames (for timestamp generation)
     // 2000 us = 500 FPS
     // 1000 us = 1000 FPS
-    int64_t frame_interval_us = 2000;
+    // 200 us = 5000 FPS (for 10G Ethernet demo)
+    int64_t frame_interval_us = 200;
     
     // =========================================================================
     // DEBUG SETTINGS
