@@ -16,16 +16,17 @@ UdpReceiver::UdpReceiver(const Config& cfg)
     : config_(cfg)
     , socket_(INVALID_SOCK)
     , bound_(false)
-    , accumulated_bytes_(0)
+    , leftover_bytes_(0)
     , total_bytes_received_(0)
     , total_frames_received_(0)
 {
     initSocketLib();
 
     // Pre-allocate buffers
-    accumulation_buffer_.resize(cfg.frame_size());
     // UDP max packet size - typically 65535, but we use configured value
     packet_buffer_.resize(cfg.udp_packet_size);
+    // Leftover buffer can hold at most one packet worth of leftover data
+    leftover_buffer_.resize(cfg.udp_packet_size);
 }
 
 UdpReceiver::~UdpReceiver()
@@ -37,14 +38,15 @@ UdpReceiver::UdpReceiver(UdpReceiver&& other) noexcept
     : config_(other.config_)
     , socket_(other.socket_)
     , bound_(other.bound_)
-    , accumulation_buffer_(std::move(other.accumulation_buffer_))
-    , accumulated_bytes_(other.accumulated_bytes_)
     , packet_buffer_(std::move(other.packet_buffer_))
+    , leftover_buffer_(std::move(other.leftover_buffer_))
+    , leftover_bytes_(other.leftover_bytes_)
     , total_bytes_received_(other.total_bytes_received_)
     , total_frames_received_(other.total_frames_received_)
 {
     other.socket_ = INVALID_SOCK;
     other.bound_ = false;
+    other.leftover_bytes_ = 0;
 }
 
 UdpReceiver& UdpReceiver::operator=(UdpReceiver&& other) noexcept
@@ -53,13 +55,14 @@ UdpReceiver& UdpReceiver::operator=(UdpReceiver&& other) noexcept
         disconnect();
         socket_ = other.socket_;
         bound_ = other.bound_;
-        accumulation_buffer_ = std::move(other.accumulation_buffer_);
-        accumulated_bytes_ = other.accumulated_bytes_;
         packet_buffer_ = std::move(other.packet_buffer_);
+        leftover_buffer_ = std::move(other.leftover_buffer_);
+        leftover_bytes_ = other.leftover_bytes_;
         total_bytes_received_ = other.total_bytes_received_;
         total_frames_received_ = other.total_frames_received_;
         other.socket_ = INVALID_SOCK;
         other.bound_ = false;
+        other.leftover_bytes_ = 0;
     }
     return *this;
 }
@@ -147,7 +150,7 @@ bool UdpReceiver::connect()
     bound_ = true;
     total_bytes_received_ = 0;
     total_frames_received_ = 0;
-    accumulated_bytes_ = 0;
+    leftover_bytes_ = 0;
 
     std::cout << "UDP socket bound successfully! Waiting for data on port "
               << config_.camera_port << std::endl;
@@ -165,7 +168,7 @@ void UdpReceiver::disconnect()
         socket_ = INVALID_SOCK;
     }
     bound_ = false;
-    accumulated_bytes_ = 0;
+    leftover_bytes_ = 0;
 }
 
 bool UdpReceiver::isConnected() const
@@ -180,14 +183,34 @@ bool UdpReceiver::receiveFrame(std::vector<uint8_t>& buffer)
         return false;
     }
 
-    int frame_size = getFrameSize();
+    size_t frame_size = static_cast<size_t>(getFrameSize());
     buffer.resize(frame_size);
 
-    // Reset accumulation for new frame
-    accumulated_bytes_ = 0;
+    size_t accumulated_bytes = 0;
+
+    // First, copy any leftover bytes from previous frame
+    if (leftover_bytes_ > 0) {
+        size_t bytes_to_copy = std::min(leftover_bytes_, frame_size);
+        std::memcpy(buffer.data(), leftover_buffer_.data(), bytes_to_copy);
+        accumulated_bytes = bytes_to_copy;
+
+        if (config_.verbose) {
+            std::cout << "Used " << bytes_to_copy << " leftover bytes from previous packet"
+                      << std::endl;
+        }
+
+        // If there are still more leftover bytes (frame smaller than leftover), shift them
+        if (leftover_bytes_ > bytes_to_copy) {
+            size_t remaining = leftover_bytes_ - bytes_to_copy;
+            std::memmove(leftover_buffer_.data(), leftover_buffer_.data() + bytes_to_copy, remaining);
+            leftover_bytes_ = remaining;
+        } else {
+            leftover_bytes_ = 0;
+        }
+    }
 
     // Accumulate UDP packets until we have a complete frame
-    while (accumulated_bytes_ < static_cast<size_t>(frame_size)) {
+    while (accumulated_bytes < frame_size) {
         struct sockaddr_in sender_addr;
         socklen_t sender_len = sizeof(sender_addr);
 
@@ -210,29 +233,35 @@ bool UdpReceiver::receiveFrame(std::vector<uint8_t>& buffer)
             return false;
         }
 
-        // Calculate how many bytes we can use from this packet
-        size_t bytes_needed = frame_size - accumulated_bytes_;
+        total_bytes_received_ += static_cast<size_t>(received);
+
+        // Calculate how many bytes we need for this frame
+        size_t bytes_needed = frame_size - accumulated_bytes;
         size_t bytes_to_copy = std::min(bytes_needed, static_cast<size_t>(received));
 
         // Copy to output buffer
-        std::memcpy(buffer.data() + accumulated_bytes_, packet_buffer_.data(), bytes_to_copy);
-        accumulated_bytes_ += bytes_to_copy;
-        total_bytes_received_ += received;
+        std::memcpy(buffer.data() + accumulated_bytes, packet_buffer_.data(), bytes_to_copy);
+        accumulated_bytes += bytes_to_copy;
 
         if (config_.verbose) {
             char sender_ip[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &sender_addr.sin_addr, sender_ip, sizeof(sender_ip));
             std::cout << "Received UDP packet: " << received << " bytes from "
                       << sender_ip << ":" << ntohs(sender_addr.sin_port)
-                      << " (accumulated: " << accumulated_bytes_ << "/" << frame_size << ")"
+                      << " (accumulated: " << accumulated_bytes << "/" << frame_size << ")"
                       << std::endl;
         }
 
-        // If packet was larger than needed (unusual case), we discard the extra
-        // This can happen if the sender's frame size doesn't match ours
-        if (static_cast<size_t>(received) > bytes_needed && config_.verbose) {
-            std::cerr << "Warning: Discarded " << (received - bytes_to_copy)
-                      << " extra bytes from UDP packet" << std::endl;
+        // Save any extra bytes for the next frame (critical for continuous streaming!)
+        if (static_cast<size_t>(received) > bytes_needed) {
+            leftover_bytes_ = static_cast<size_t>(received) - bytes_needed;
+            std::memcpy(leftover_buffer_.data(),
+                       packet_buffer_.data() + bytes_needed,
+                       leftover_bytes_);
+
+            if (config_.verbose) {
+                std::cout << "Saved " << leftover_bytes_ << " bytes for next frame" << std::endl;
+            }
         }
     }
 
