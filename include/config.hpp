@@ -46,7 +46,7 @@ struct Config {
     // =========================================================================
     
     // Does the camera send a size header before each frame?
-    bool has_header = true;
+    bool has_header = false;  // No header - raw frames back-to-back
     
     // Header size in bytes (only used if has_header = true)
     // Common values: 4 (uint32_t size)
