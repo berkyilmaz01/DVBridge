@@ -502,11 +502,49 @@ python3 test/realistic_camera.py --scene dots --text "HELLO" --fps 100
 
 ---
 
-## DV Processing Integration
+## Visualization Options
+
+### Option 1: Python Viewer (Recommended for Quick Setup)
+
+A simple Python viewer is included - no DV-GUI required:
+
+```bash
+# Install dependencies
+pip install dv-processing opencv-python
+
+# Run viewer
+python tools/viewer.py
+```
+
+**Features:**
+- Real-time event display with color coding (green=positive, red=negative)
+- Live statistics (events/sec, total events)
+- Screenshot (press S)
+- Video recording (press R)
+- Works on Windows, Linux, macOS
+
+**Controls:**
+| Key | Action |
+|-----|--------|
+| Q / ESC | Quit |
+| S | Save screenshot |
+| R | Toggle recording |
+| C | Clear frame |
+
+### Option 2: DV-GUI (Full Processing Pipeline)
+
+For advanced processing, use DV-GUI:
+
+1. Open DV-GUI application
+2. In the **Module Browser** (left panel), find **"Network TCP Client"**
+3. Drag it to the canvas
+4. Set IP: `127.0.0.1`, Port: `7777`
+5. Add a **Visualizer** module and connect them
+6. Press **Run**
 
 ### Available DV Modules
 
-Once events are streamed via this converter, you can use all DV-GUI modules:
+Once events are streamed via DVBridge, you can use all DV-GUI modules:
 
 | Category | Modules |
 |----------|---------|
