@@ -120,13 +120,17 @@ Terminal 3              Terminal 1              Terminal 2
 
 | Component | Purpose |
 |-----------|---------|
-| Ubuntu 20.04+ | Recommended OS |
+| Ubuntu 20.04+ / Windows 10+ | Supported operating systems |
 | Custom Event Camera | FPGA/sensor outputting 2-bit packed frames |
 | Ethernet Connection | Direct or via switch to camera |
 | DV Processing | AEDAT4 encoding library |
 | DV GUI | Visualization and processing modules |
 
-### Step 1: Install DV Software Suite
+---
+
+### Linux/Ubuntu Installation
+
+#### Step 1: Install DV Software Suite
 
 ```bash
 # Update package list
@@ -144,14 +148,7 @@ sudo apt install -y dv-processing dv-gui
 dv-gui --version
 ```
 
-**What gets installed:**
-
-| Package | Description |
-|---------|-------------|
-| `dv-processing` | C++ library for AEDAT4 encoding, event processing, and network streaming |
-| `dv-gui` | Visual interface with modular processing pipeline (filters, visualizers, recorders) |
-
-### Step 2: Build the Converter
+#### Step 2: Build the Converter
 
 ```bash
 # Clone repository
@@ -167,6 +164,98 @@ make
 # Verify build
 ls -la converter  # Should show the executable
 ```
+
+---
+
+### Windows Installation
+
+#### Step 1: Install Prerequisites
+
+1. **Visual Studio 2019 or newer**
+   - Download from: https://visualstudio.microsoft.com/
+   - During installation, select **"Desktop development with C++"** workload
+
+2. **CMake 3.14+**
+   - Download from: https://cmake.org/download/
+   - Add to PATH during installation
+
+3. **vcpkg (Package Manager)**
+   ```powershell
+   cd C:\
+   git clone https://github.com/Microsoft/vcpkg.git
+   cd vcpkg
+   .\bootstrap-vcpkg.bat
+   .\vcpkg integrate install
+   ```
+
+#### Step 2: Install Dependencies
+
+```powershell
+cd C:\vcpkg
+
+# Install dv-processing and OpenCV (this may take 15-30 minutes)
+.\vcpkg install dv-processing:x64-windows
+.\vcpkg install opencv4:x64-windows
+```
+
+#### Step 3: Install DV-GUI
+
+Download and install DV-GUI from iniVation:
+- https://docs.inivation.com/software/dv/dv-gui.html
+- Run the Windows installer (.exe)
+
+#### Step 4: Build the Converter
+
+```powershell
+# Clone repository
+cd %USERPROFILE%
+git clone https://github.com/berkyilmaz01/tcp-to-aedat4-converter.git
+cd tcp-to-aedat4-converter
+
+# Create build directory
+mkdir build
+cd build
+
+# Configure with vcpkg toolchain
+cmake .. -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+
+# Build
+cmake --build . --config Release
+
+# Verify build
+dir Release\converter.exe
+```
+
+#### Step 5: Allow Through Firewall
+
+Windows Firewall may block the network ports. Allow them:
+
+1. Open **Windows Defender Firewall**
+2. Click **"Allow an app through firewall"**
+3. Add `converter.exe` and allow both Private and Public networks
+4. Or run in PowerShell (Admin):
+   ```powershell
+   netsh advfirewall firewall add rule name="DVBridge 6000" dir=in action=allow protocol=tcp localport=6000
+   netsh advfirewall firewall add rule name="DVBridge 7777" dir=in action=allow protocol=tcp localport=7777
+   ```
+
+#### Running on Windows
+
+```powershell
+# Terminal 1: Start converter
+cd tcp-to-aedat4-converter\build\Release
+.\converter.exe
+
+# Terminal 2: Start DV-GUI
+# Launch from Start Menu or run:
+"C:\Program Files\iniVation\dv-gui\dv-gui.exe"
+
+# Terminal 3: Test with simulator
+cd tcp-to-aedat4-converter
+python test\fake_camera.py
+```
+
+---
 
 ### Step 3: Configure for Your Hardware
 
@@ -548,7 +637,7 @@ dv-gui
 | Default Resolution | 1280 × 720 |
 | Default Frame Size | 230,400 bytes |
 | Default Frame Rate | 100 FPS |
-| Supported OS | Linux (Ubuntu 20.04+), macOS |
+| Supported OS | Linux (Ubuntu 20.04+), Windows 10+, macOS |
 
 ---
 
